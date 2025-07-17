@@ -530,7 +530,16 @@ async def suero_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 def main() -> None:
     """Ejecutar el bot"""
-    application = Application.builder().token("TELEGRAM_BOT_TOKEN").build()
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+
+    if not telegram_bot_token:
+        # Esto es importante para que el bot no intente iniciar sin el token
+        logger.error("Error: La variable de entorno TELEGRAM_BOT_TOKEN no está configurada.")
+        # Opcional: puedes salir del programa si el token es crítico
+        import sys
+        sys.exit(1)
+        
+    application = Application.builder().token(telegram_bot_token).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start),
