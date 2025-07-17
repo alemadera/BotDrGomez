@@ -530,7 +530,7 @@ async def suero_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 def main() -> None:
     """Ejecutar el bot"""
-    application = Application.builder().token("7045188451:AAFOssRxR-6h1EOzfnGip06lX1OMP5WwOS0").build()
+    application = Application.builder().token("TELEGRAM_BOT_TOKEN").build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start),
