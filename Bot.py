@@ -531,7 +531,8 @@ async def suero_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 def main() -> None:
     """Ejecutar el bot"""
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    print("TOKEN:", telegram_bot_token)
 
     if not telegram_bot_token:
         # Esto es importante para que el bot no intente iniciar sin el token
