@@ -785,31 +785,51 @@ async def cita_correo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def cita_direccion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['direccion'] = update.message.text
 
-    # Resumen
-    resumen = (
-        "✅ *Datos recibidos:*\n\n"
-        f"👤 Nombre: {context.user_data['nombre']}\n"
-        f"📅 Nacimiento: {context.user_data['nacimiento']}\n"
-        f"🎂 Edad: {context.user_data['edad']}\n"
-        f"🪪 Documento: {context.user_data['documento']}\n"
-        f"💼 Ocupación: {context.user_data['ocupacion']}\n"
-        f"👤 Referido por: {context.user_data['referido']}\n"
-        f"📞 Tel. fijo: {context.user_data['telefono_fijo']}\n"
-        f"📱 Celular: {context.user_data['celular']}\n"
-        f"📧 Correo: {context.user_data['correo']}\n"
-        f"🏠 Dirección: {context.user_data['direccion']}\n\n"
-        "Selecciona el tipo de cita para mostrar horarios disponibles."
-    )
+    try:
+        nombre = context.user_data.get('nombre', '')
+        nacimiento = context.user_data.get('nacimiento', '')
+        edad = context.user_data.get('edad', '')
+        documento = context.user_data.get('documento', '')
+        ocupacion = context.user_data.get('ocupacion', '')
+        referido = context.user_data.get('referido', '')
+        telefono_fijo = context.user_data.get('telefono_fijo', '')
+        celular = context.user_data.get('celular', '')
+        correo = context.user_data.get('correo', '')
+        direccion = context.user_data.get('direccion', '')
 
-    await update.message.reply_text(resumen)
+        resumen = (
+            "✅ Datos recibidos:\n\n"
+            f"👤 Nombre: {nombre}\n"
+            f"📅 Nacimiento: {nacimiento}\n"
+            f"🎂 Edad: {edad}\n"
+            f"🪪 Documento: {documento}\n"
+            f"💼 Ocupación: {ocupacion}\n"
+            f"👤 Referido por: {referido}\n"
+            f"📞 Tel. fijo: {telefono_fijo}\n"
+            f"📱 Celular: {celular}\n"
+            f"📧 Correo: {correo}\n"
+            f"🏠 Dirección: {direccion}\n"
+        )
 
-    # Pedir tipo de cita
-    botones = [[t] for t in APPOINTMENT_TYPES]
-    await update.message.reply_text(
-        "¿Qué tipo de cita deseas agendar?",
-        reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
-    )
-    return CITAS_ELEGIR_TIPO
+        await update.message.reply_text(resumen)
+        await asyncio.sleep(0.3)
+        botones = [[t] for t in APPOINTMENT_TYPES]
+        await update.message.reply_text(
+            "¿Qué tipo de cita deseas agendar?",
+            reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+        )
+        return CITAS_ELEGIR_TIPO
+    except Exception as e:
+        logger.exception(f"Error tras capturar dirección: {e}")
+        await update.message.reply_text(
+            "Ocurrió un error preparando la agenda. Intentemos nuevamente desde el tipo de cita."
+        )
+        botones = [[t] for t in APPOINTMENT_TYPES]
+        await update.message.reply_text(
+            "¿Qué tipo de cita deseas agendar?",
+            reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+        )
+        return CITAS_ELEGIR_TIPO
 
 # ====== FLUJO DE SUEROTERAPIA ======
 async def suero_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
