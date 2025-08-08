@@ -793,15 +793,24 @@ async def handle_policies(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Recordatorio de políticas antes de finalizar"""
     botones = [["Sí, estoy de acuerdo", "No"]]
     await update.message.reply_text(
-        "📝 Acuerdo para el agendamiento\n\n"
-        "Para separar tu cita debes tener en cuenta las siguientes recomendaciones:\n\n"
-        "1. Una vez que separes tu cita, no podrás realizar modificaciones al horario que se te asigne.\n"
-        "2. Si no puedes asistir al cumplimiento de la cita, esta podrá ser reagendada una única vez y deberás dar aviso con al menos 24 horas de anticipación, enviando un mensaje de WhatsApp al 3163568908.\n"
-        "3. Para reservar la cita en el horario que selecciones deberás cancelar el porcentaje del valor de la consulta médica: 50.000 pesos colombianos, que podrás realizar por Nequi o directamente a la cuenta de Bancolombia del Dr. Luis Fernando Gómez.\n"
-        "4. Si no asistes a la cita y no has dado aviso con al menos 24 horas de anticipación, los 50.000 pesos no serán reembolsados. En caso de que no puedas asistir, pero hayas dado aviso antes del tiempo estimado, podrás reagendar una única vez tu cita.\n"
-        "5. El horario es muy importante para poder brindarte una atención profesional adecuada, por favor sé puntual.\n"
-        "6. Todos los datos personales serán tratados bajo la ley de confidencialidad.\n"
-        "7. Al continuar estarás aceptando las condiciones anteriores y estarás dando tu consentimiento para agendar tu cita médica.\n\n"
+        "📋 Acuerdo para el Agendamiento de Citas\n\n"
+        "Para separar tu cita, ten en cuenta las siguientes condiciones:\n\n"
+        "1️⃣ Modificación de horario:\n"
+        "Una vez separes tu cita, no podrás cambiar el horario asignado.\n\n"
+        "2️⃣ Reagendamiento:\n"
+        "Si no puedes asistir, podrás reagendar una sola vez avisando con mínimo 24 horas de anticipación.\n"
+        "Debes enviar el aviso por WhatsApp al 316 356 8908.\n\n"
+        "3️⃣ Reserva de la cita:\n"
+        "Para confirmar tu horario, debes cancelar $50.000 COP (por Nequi o cuenta Bancolombia del Dr. Luis Fernando Gómez). Este valor corresponde a un anticipo del costo de la consulta médica.\n\n"
+        "4️⃣ Política de no asistencia:\n"
+        "Si no asistes y no avisas con mínimo 24 horas de anticipación, el anticipo no será reembolsado.\n"
+        "Si avisas a tiempo, podrás reagendar una sola vez sin costo adicional.\n\n"
+        "5️⃣ Puntualidad:\n"
+        "El horario es fundamental para brindarte una atención profesional. Por favor, llega a tiempo.\n\n"
+        "6️⃣ Confidencialidad:\n"
+        "Todos tus datos personales serán tratados conforme a la ley de protección de datos.\n\n"
+        "7️⃣ Consentimiento:\n"
+        "Al continuar con el proceso, aceptas estas condiciones y das tu consentimiento para agendar tu cita médica.\n\n"
         "¿Estás de acuerdo?",
         reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
     )
