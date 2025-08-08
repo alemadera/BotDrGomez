@@ -16,6 +16,8 @@ from dateutil import parser as date_parser
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import gspread
+import json
+import requests
 
 # Configuración de logging
 logging.basicConfig(
@@ -151,7 +153,28 @@ def get_calendar_service():
     return _CALENDAR_SERVICE
 
 
+INTEGRATION_MODE = os.environ.get('INTEGRATION_MODE', 'google_api')  # 'google_api' | 'apps_script'
+APPS_SCRIPT_URL = os.environ.get('APPS_SCRIPT_URL')
+APPS_SCRIPT_TOKEN = os.environ.get('APPS_SCRIPT_TOKEN')
+
+def apps_script_call(action: str, payload: dict):
+    if not APPS_SCRIPT_URL:
+        raise RuntimeError('APPS_SCRIPT_URL no configurado')
+    data = {'action': action, 'token': APPS_SCRIPT_TOKEN, **payload}
+    resp = requests.post(APPS_SCRIPT_URL, json=data, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
+
 def sheets_find_patient(documento: str):
+    if INTEGRATION_MODE == 'apps_script':
+        try:
+            res = apps_script_call('find_patient', {'documento': str(documento)})
+            return res.get('patient')
+        except Exception as e:
+            logger.exception(f"AppsScript find_patient error: {e}")
+            return None
+    # Modo API de Google
     if not SHEETS_SPREADSHEET_ID:
         logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado; omitiendo búsqueda en Sheets")
         return None
@@ -161,7 +184,6 @@ def sheets_find_patient(documento: str):
         ws = sh.worksheet(SHEETS_PACIENTE_SHEET_NAME)
         records = ws.get_all_records()
         for record in records:
-            # Matcheo flexible por string
             if str(record.get('Documento', '')).strip() == str(documento).strip():
                 return record
         return None
@@ -171,6 +193,14 @@ def sheets_find_patient(documento: str):
 
 
 def sheets_append_agenda(row_dict: dict):
+    if INTEGRATION_MODE == 'apps_script':
+        try:
+            apps_script_call('append_agenda', {'row': row_dict})
+            return True
+        except Exception as e:
+            logger.exception(f"AppsScript append_agenda error: {e}")
+            return False
+    # Modo API de Google
     if not SHEETS_SPREADSHEET_ID:
         logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado; no se registrará la agenda en Sheets")
         return False
@@ -178,8 +208,6 @@ def sheets_append_agenda(row_dict: dict):
         gc = get_gspread_client()
         sh = gc.open_by_key(SHEETS_SPREADSHEET_ID)
         ws = sh.worksheet(SHEETS_AGENDA_SHEET_NAME)
-        # Orden de columnas definido por el usuario:
-        # Documento, Nombre, Telefono, Tipo de Cita, Fecha, Hora Inicio, Correo, CalendarEventId, Estado
         valores = [
             row_dict.get('Documento', ''),
             row_dict.get('Nombre', ''),
@@ -208,6 +236,16 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
 
 
 def _list_calendar_events_in_window(start_window: datetime, end_window: datetime):
+    if INTEGRATION_MODE == 'apps_script':
+        try:
+            res = apps_script_call('list_events', {
+                'timeMin': start_window.isoformat(),
+                'timeMax': end_window.isoformat(),
+            })
+            return res.get('items', [])
+        except Exception as e:
+            logger.exception(f"AppsScript list_events error: {e}")
+            return []
     service = get_calendar_service()
     events = []
     page_token = None
@@ -297,6 +335,14 @@ def calendar_list_free_slots_for_type(appointment_type: str, limit: int = 8):
 
 
 def calendar_create_event(start_iso: str, end_iso: str, summary: str, description: str) -> str:
+    if INTEGRATION_MODE == 'apps_script':
+        res = apps_script_call('create_event', {
+            'start': start_iso,
+            'end': end_iso,
+            'summary': summary,
+            'description': description,
+        })
+        return res.get('eventId', '')
     service = get_calendar_service()
     event = {
         'summary': summary,
