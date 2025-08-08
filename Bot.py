@@ -739,8 +739,12 @@ async def cita_nacimiento(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def cita_edad(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['edad'] = update.message.text
-    await update.message.reply_text("🪪 Número de documento:")
-    return CITA_DOCUMENTO
+    if context.user_data.get('documento'):
+        await update.message.reply_text("💼 Ocupación:")
+        return CITA_OCUPACION
+    else:
+        await update.message.reply_text("🪪 Número de documento:")
+        return CITA_DOCUMENTO
 
 def _normalize_document(value: str) -> str:
     if value is None:
@@ -775,6 +779,10 @@ async def cita_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return CITAS_CONFIRMAR_PACIENTE
 
     await update.message.reply_text("No encontramos tu registro. Continuaremos registrando tus datos para agendar.")
+    # Si aún no tenemos nombre, lo pedimos antes de ocupación
+    if not context.user_data.get('nombre'):
+        await update.message.reply_text("📝 Por favor escribe el *nombre completo del paciente*:", parse_mode="Markdown")
+        return CITA_NOMBRE
     await update.message.reply_text("💼 Ocupación:")
     return CITA_OCUPACION
 
