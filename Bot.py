@@ -392,20 +392,20 @@ async def menu_es(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(
             "📋 *DATOS BÁSICOS DEL PACIENTE*\n\n"
             "A continuación, te pediremos la siguiente información:\n\n"
-            "1️⃣ Nombre completo del paciente\n"
-            "2️⃣ Fecha de nacimiento\n"
-            "3️⃣ Años cumplidos\n"
-            "4️⃣ Número de documento\n"
+            "1️⃣ Número de documento\n"
+            "2️⃣ Nombre completo del paciente\n"
+            "3️⃣ Fecha de nacimiento\n"
+            "4️⃣ Años cumplidos\n"
             "5️⃣ Ocupación\n"
             "6️⃣ Referido por\n"
             "7️⃣ Teléfono fijo\n"
             "8️⃣ Celular\n"
             "9️⃣ Correo electrónico\n"
             "🔟 Dirección de residencia\n\n"
-            "📝 *Empecemos*. Por favor escribe el *nombre completo del paciente*:",
+            "📝 *Empecemos*. Por favor escribe el *número de documento*:",
             parse_mode="Markdown"
         )
-        return CITA_NOMBRE
+        return CITA_DOCUMENTO
 
     elif text == "💊 Tratamientos":
         return await tratamientos_menu(update, context)
@@ -529,8 +529,8 @@ async def precios_siguiente(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     text = update.message.text
 
     if text == "Agendar cita":
-        await update.message.reply_text("📝 ¿Cuál es tu *nombre completo* y *fecha de nacimiento*?", parse_mode="Markdown")
-        return CITA_NOMBRE
+        await update.message.reply_text("🪪 Por favor escribe tu *número de documento*:", parse_mode="Markdown")
+        return CITA_DOCUMENTO
 
     elif text == "Otra consulta":
         return await precios_menu(update, context)
@@ -593,8 +593,8 @@ async def educacion_siguiente(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text.strip().lower()
 
     if "sí" in text or "si" in text:
-        await update.message.reply_text("📝 ¿Cuál es tu *nombre completo* y *fecha de nacimiento*?", parse_mode="Markdown")
-        return CITA_NOMBRE
+        await update.message.reply_text("🪪 Por favor escribe tu *número de documento*:", parse_mode="Markdown")
+        return CITA_DOCUMENTO
     elif "volver" in text:
         return await educacion_menu(update, context)
     else:
@@ -873,8 +873,8 @@ async def suero_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return await suero_menu(update, context)
 
     elif suero == "📅 Agendar cita":
-        await update.message.reply_text("📝 ¿Cuál es tu *nombre completo* y *fecha de nacimiento*?", parse_mode="Markdown")
-        return CITA_NOMBRE
+        await update.message.reply_text("🪪 Por favor escribe tu *número de documento*:", parse_mode="Markdown")
+        return CITA_DOCUMENTO
 
     elif suero == "🔙 Menú principal":
         return await menu(update, context)
