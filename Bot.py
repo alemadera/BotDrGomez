@@ -265,6 +265,56 @@ def sheets_append_patient(row_dict: dict) -> bool:
         return False
 
 
+def sheets_update_patient_last(documento: str, fecha_str: str, motivo: str) -> bool:
+    if INTEGRATION_MODE == 'apps_script':
+        try:
+            res = apps_script_call('update_patient_last', {
+                'documento': str(documento),
+                'fecha': fecha_str,
+                'motivo': motivo,
+            })
+            if not res.get('ok', False):
+                logger.error(f"AppsScript update_patient_last failed: {res}")
+                return False
+            return True
+        except Exception as e:
+            logger.exception(f"AppsScript update_patient_last error: {e}")
+            return False
+    # Google API directo
+    if not SHEETS_SPREADSHEET_ID:
+        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado; no se actualizará Pacientes")
+        return False
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_key(SHEETS_SPREADSHEET_ID)
+        ws = sh.worksheet(SHEETS_PACIENTE_SHEET_NAME)
+        headers = ws.row_values(1)
+        # Ubicar índices de columnas
+        try:
+            doc_col = headers.index('Documento') + 1
+            ultima_col = headers.index('Ultima cita') + 1
+            motivo_col = headers.index('Motivo ultima consulta') + 1
+        except ValueError:
+            logger.error("Encabezados requeridos no encontrados en Pacientes")
+            return False
+        # Buscar fila por documento
+        col_docs = ws.col_values(doc_col)
+        row_idx = None
+        for i, v in enumerate(col_docs[1:], start=2):
+            if str(v).strip() == str(documento).strip():
+                row_idx = i
+                break
+        if row_idx is None:
+            logger.warning("Documento no encontrado en Pacientes al intentar actualizar última cita")
+            return False
+        ws.update_cell(row_idx, ultima_col, fecha_str)
+        ws.update_cell(row_idx, motivo_col, motivo)
+        return True
+    except Exception as e:
+        logger.exception(f"Error actualizando Pacientes: {e}")
+        return False
+
+
 def _parse_hhmm(value: str) -> time:
     parts = value.split(':')
     return time(hour=int(parts[0]), minute=int(parts[1]))
@@ -1086,8 +1136,10 @@ async def elegir_horario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             'CalendarEventId': event_id,
             'Estado': 'Agendado',
         })
+        # Actualizar hoja Pacientes con última cita y motivo
+        sheets_update_patient_last(documento, s_dt.strftime('%Y-%m-%d'), tipo_cita)
     except Exception as e:
-        logger.exception(f"Error guardando en AgendaCitas: {e}")
+        logger.exception(f"Error guardando en AgendaCitas / actualizando Pacientes: {e}")
 
     await update.message.reply_text(
         f"✅ Cita agendada para {elegido}.\nID de evento: {event_id}",
