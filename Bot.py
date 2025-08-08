@@ -559,14 +559,26 @@ async def menu_es(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "📋 Las observaciones te serán compartidas en tu próximo control.\n"
             "⚠️ Recuerda: esta información no será tratada como urgente, salvo que así se haya acordado previamente en tu consulta."
         )
-        return await menu(update, context)
+        await asyncio.sleep(0.3)
+        await update.message.reply_text(
+            "🔄 ¿Qué deseas hacer ahora?\n\n"
+            "👉 Volver al menú: /menu\n"
+            "🚪 Cerrar la conversación: /cancel"
+        )
+        return MENU_ES
 
     elif text == "⏳ No, los enviaré luego":
         await update.message.reply_text(
             "Está bien 👍.\n"
             "Cuando los tengas listos, recuerda enviarlos por los canales indicados para que estén disponibles antes de tu cita."
         )
-        return await menu(update, context)
+        await asyncio.sleep(0.3)
+        await update.message.reply_text(
+            "🔄 ¿Qué deseas hacer ahora?\n\n"
+            "👉 Volver al menú: /menu\n"
+            "🚪 Cerrar la conversación: /cancel"
+        )
+        return MENU_ES
 
     else:
         await update.message.reply_text("Por favor elige una opción válida del menú.")
