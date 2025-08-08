@@ -666,12 +666,16 @@ async def handle_policies(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Recordatorio de políticas antes de finalizar"""
     botones = [["Sí, estoy de acuerdo", "No"]]
     await update.message.reply_text(
-        "📝 *Recordatorio de políticas:*\n\n"
-        "- Las cancelaciones deben hacerse con al menos 24h de anticipación.\n"
-        "- Todos los datos se tratan bajo confidencialidad.\n"
-        "- Al continuar, aceptas el consentimiento informado.\n\n"
+        "📝 Acuerdo para el agendamiento\n\n"
+        "Para separar tu cita debes tener en cuenta las siguientes recomendaciones:\n\n"
+        "1. Una vez que separes tu cita, no podrás realizar modificaciones al horario que se te asigne.\n"
+        "2. Si no puedes asistir al cumplimiento de la cita, esta podrá ser reagendada una única vez y deberás dar aviso con al menos 24 horas de anticipación, enviando un mensaje de WhatsApp al 3163568908.\n"
+        "3. Para reservar la cita en el horario que selecciones deberás cancelar el porcentaje del valor de la consulta médica: 50.000 pesos colombianos, que podrás realizar por Nequi o directamente a la cuenta de Bancolombia del Dr. Luis Fernando Gómez.\n"
+        "4. Si no asistes a la cita y no has dado aviso con al menos 24 horas de anticipación, los 50.000 pesos no serán reembolsados. En caso de que no puedas asistir, pero hayas dado aviso antes del tiempo estimado, podrás reagendar una única vez tu cita.\n"
+        "5. El horario es muy importante para poder brindarte una atención profesional adecuada, por favor sé puntual.\n"
+        "6. Todos los datos personales serán tratados bajo la ley de confidencialidad.\n"
+        "7. Al continuar estarás aceptando las condiciones anteriores y estarás dando tu consentimiento para agendar tu cita médica.\n\n"
         "¿Estás de acuerdo?",
-        parse_mode="Markdown",
         reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
     )
     return POLICIES
