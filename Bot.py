@@ -276,7 +276,7 @@ def calendar_list_free_slots_for_type(appointment_type: str, limit: int = 8):
         items = _list_calendar_events_in_window(start_window, end_window)
     except Exception as e:
         logger.exception(f"Error listando eventos del calendario: {e}")
-        return []
+        items = []
 
     # Mapear ocupaciones por día y verificar si hay colonterapia por día
     busy_by_day = {}
@@ -312,17 +312,14 @@ def calendar_list_free_slots_for_type(appointment_type: str, limit: int = 8):
         weekday = tz.localize(datetime.combine(cursor_day, time(0, 0))).isoweekday()
         day_template = SLOT_TEMPLATES.get(weekday, {}).get(appointment_type, [])
         if day_template:
-            # Condición: para Control, el slot 16:30-17:00 solo si no hay colonterapia ese día
             for hhmm_start, hhmm_end in day_template:
                 if appointment_type == 'Control' and hhmm_start == '16:30' and hhmm_end == '17:00':
                     if has_colonterapia_by_day.get(cursor_day, False):
                         continue
                 start_dt = tz.localize(datetime.combine(cursor_day, _parse_hhmm(hhmm_start)))
                 end_dt = tz.localize(datetime.combine(cursor_day, _parse_hhmm(hhmm_end)))
-                # Evitar pasado
                 if end_dt <= now:
                     continue
-                # Chequear choque
                 day_busy = busy_by_day.get(cursor_day, [])
                 conflict = any(_overlaps(start_dt, end_dt, b0, b1) for b0, b1 in day_busy)
                 if not conflict:
@@ -331,6 +328,28 @@ def calendar_list_free_slots_for_type(appointment_type: str, limit: int = 8):
                     if len(slots) >= limit:
                         break
         cursor_day = cursor_day + timedelta(days=1)
+
+    # Fallback: si no hay slots (p.ej., por error en listado de eventos), mostrar la plantilla ignorando calendario
+    if not slots:
+        cursor_day = start_window.date()
+        while cursor_day <= end_window.date() and len(slots) < limit:
+            weekday = tz.localize(datetime.combine(cursor_day, time(0, 0))).isoweekday()
+            day_template = SLOT_TEMPLATES.get(weekday, {}).get(appointment_type, [])
+            for hhmm_start, hhmm_end in day_template:
+                if appointment_type == 'Control' and hhmm_start == '16:30' and hhmm_end == '17:00':
+                    # Mantener la regla de colonterapia solo si tenemos esa señal
+                    if has_colonterapia_by_day.get(cursor_day, False):
+                        continue
+                start_dt = tz.localize(datetime.combine(cursor_day, _parse_hhmm(hhmm_start)))
+                end_dt = tz.localize(datetime.combine(cursor_day, _parse_hhmm(hhmm_end)))
+                if end_dt <= now:
+                    continue
+                label = f"{start_dt.strftime('%Y-%m-%d %H:%M')} - {end_dt.strftime('%H:%M')}"
+                slots.append({'label': label, 'start': start_dt.isoformat(), 'end': end_dt.isoformat()})
+                if len(slots) >= limit:
+                    break
+            cursor_day = cursor_day + timedelta(days=1)
+
     return slots
 
 
