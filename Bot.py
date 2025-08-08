@@ -721,8 +721,15 @@ async def cita_edad(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("🪪 Número de documento:")
     return CITA_DOCUMENTO
 
+def _normalize_document(value: str) -> str:
+    if value is None:
+        return ''
+    return ''.join(ch for ch in str(value) if ch.isalnum()).lower()
+
 async def cita_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['documento'] = update.message.text
+    raw_doc = update.message.text
+    norm_doc = _normalize_document(raw_doc)
+    context.user_data['documento'] = norm_doc or raw_doc
 
     # Intentar buscar en Google Sheets
     paciente = sheets_find_patient(context.user_data['documento'])
@@ -746,6 +753,7 @@ async def cita_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(resumen, reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True))
         return CITAS_CONFIRMAR_PACIENTE
 
+    await update.message.reply_text("No encontramos tu registro. Continuaremos registrando tus datos para agendar.")
     await update.message.reply_text("💼 Ocupación:")
     return CITA_OCUPACION
 
@@ -793,7 +801,7 @@ async def cita_direccion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "Selecciona el tipo de cita para mostrar horarios disponibles."
     )
 
-    await update.message.reply_text(resumen, parse_mode="Markdown")
+    await update.message.reply_text(resumen)
 
     # Pedir tipo de cita
     botones = [[t] for t in APPOINTMENT_TYPES]
