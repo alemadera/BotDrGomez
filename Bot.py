@@ -361,6 +361,8 @@ def calendar_create_event(start_iso: str, end_iso: str, summary: str, descriptio
             'summary': summary,
             'description': description,
         })
+        if not res.get('ok', False):
+            raise RuntimeError(f"AppsScript create_event failed: {res}")
         return res.get('eventId', '')
     service = get_calendar_service()
     event = {
