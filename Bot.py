@@ -651,7 +651,7 @@ async def precios_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     respuestas = {
         "Primera consulta": "🩺 Valor: $150.000 COP\nDuración aproximada: 60 minutos.",
-        "Seguimientos": "📅 Valor: $100.000 COP por sesión de control o evolución.",
+        "Seguimientos": "📌 Seguimiento de tratamiento\nSi actualmente te encuentras en tratamiento, las consultas de seguimiento no tendrán costo adicional.\nSi no estás en tratamiento activo y deseas agendar una nueva cita, esta tendrá el valor de una consulta de primera vez.",
         "Paquetes funcionales": "🎯 Tenemos paquetes mensuales desde $350.000 que incluyen consulta + tratamiento personalizado.",
         "Formas de pago": "💳 Aceptamos Nequi, Daviplata, transferencia bancaria y tarjeta.",
         "Enlace de pago": "🔗 Puedes pagar aquí: [https://tu-enlace-de-pago.com]",
