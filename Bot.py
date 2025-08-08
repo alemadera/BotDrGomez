@@ -10,6 +10,12 @@ from telegram.ext import (
 import logging
 import asyncio
 import os
+from datetime import datetime, timedelta, time
+import pytz
+from dateutil import parser as date_parser
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+import gspread
 
 # Configuración de logging
 logging.basicConfig(
@@ -25,9 +31,219 @@ logger = logging.getLogger(__name__)
     CITA_REFERIDO, CITA_TELFIJO, CITA_CELULAR, CITA_CORREO, CITA_DIRECCION,
     TRATAMIENTO_MENU, TRATAMIENTO_INFO, PRECIOS_MENU, PRECIOS_DECISION, 
     EDUCACION_MENU, EDUCACION_DECISION, CONTACTO_OPCION, CONTACTO_RESPUESTA,
-    SUERO_MENU, SUERO_BIENESTAR, SUERO_HORMONAL, SUERO_POSTQX, SUERO_INFO
-) = range(26)
+    SUERO_MENU, SUERO_BIENESTAR, SUERO_HORMONAL, SUERO_POSTQX, SUERO_INFO,
+    CITAS_CONFIRMAR_PACIENTE, CITAS_ELEGIR_HORARIO
+) = range(28)
 
+# ======== CONFIG & CLIENTS GOOGLE ========
+SHEETS_SPREADSHEET_ID = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_ID')
+SHEETS_PACIENTE_SHEET_NAME = os.environ.get('GOOGLE_SHEETS_PACIENTE', 'paciente')
+SHEETS_AGENDA_SHEET_NAME = os.environ.get('GOOGLE_SHEETS_AGENDA', 'AgendaCitas')
+CALENDAR_ID = os.environ.get('GOOGLE_CALENDAR_ID', 'primary')
+TIMEZONE = os.environ.get('TIMEZONE', 'America/Bogota')
+BUSINESS_HOURS_START = os.environ.get('BUSINESS_HOURS_START', '08:00')
+BUSINESS_HOURS_END = os.environ.get('BUSINESS_HOURS_END', '17:00')
+SLOT_MINUTES = int(os.environ.get('SLOT_MINUTES', '30'))
+BUSINESS_DAYS = os.environ.get('BUSINESS_DAYS', '1,2,3,4,5')  # 1=Lunes ... 7=Domingo
+DAYS_AHEAD = int(os.environ.get('DAYS_AHEAD', '14'))
+
+_GLOBAL_CREDENTIALS = None
+_GSPREAD_CLIENT = None
+_CALENDAR_SERVICE = None
+
+GOOGLE_SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/calendar'
+]
+
+
+def get_google_credentials():
+    global _GLOBAL_CREDENTIALS
+    if _GLOBAL_CREDENTIALS is not None:
+        return _GLOBAL_CREDENTIALS
+
+    creds = None
+    json_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+    json_inline = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+
+    if json_path and os.path.exists(json_path):
+        creds = service_account.Credentials.from_service_account_file(json_path, scopes=GOOGLE_SCOPES)
+    elif json_inline:
+        import json
+        info = json.loads(json_inline)
+        creds = service_account.Credentials.from_service_account_info(info, scopes=GOOGLE_SCOPES)
+    else:
+        logger.error("No se encontraron credenciales de Google. Configure GOOGLE_APPLICATION_CREDENTIALS o GOOGLE_CREDENTIALS_JSON.")
+        raise RuntimeError("Credenciales de Google no configuradas")
+
+    _GLOBAL_CREDENTIALS = creds
+    return _GLOBAL_CREDENTIALS
+
+
+def get_gspread_client():
+    global _GSPREAD_CLIENT
+    if _GSPREAD_CLIENT is None:
+        creds = get_google_credentials()
+        _GSPREAD_CLIENT = gspread.authorize(creds)
+    return _GSPREAD_CLIENT
+
+
+def get_calendar_service():
+    global _CALENDAR_SERVICE
+    if _CALENDAR_SERVICE is None:
+        creds = get_google_credentials()
+        _CALENDAR_SERVICE = build('calendar', 'v3', credentials=creds)
+    return _CALENDAR_SERVICE
+
+
+def sheets_find_patient(documento: str):
+    if not SHEETS_SPREADSHEET_ID:
+        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado; omitiendo búsqueda en Sheets")
+        return None
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_key(SHEETS_SPREADSHEET_ID)
+        ws = sh.worksheet(SHEETS_PACIENTE_SHEET_NAME)
+        records = ws.get_all_records()
+        for record in records:
+            # Matcheo flexible por string
+            if str(record.get('Documento', '')).strip() == str(documento).strip():
+                return record
+        return None
+    except Exception as e:
+        logger.exception(f"Error buscando paciente en Sheets: {e}")
+        return None
+
+
+def sheets_append_agenda(row_dict: dict):
+    if not SHEETS_SPREADSHEET_ID:
+        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado; no se registrará la agenda en Sheets")
+        return False
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_key(SHEETS_SPREADSHEET_ID)
+        ws = sh.worksheet(SHEETS_AGENDA_SHEET_NAME)
+        # Orden de columnas propuesto
+        valores = [
+            row_dict.get('Fecha', ''),
+            row_dict.get('HoraInicio', ''),
+            row_dict.get('HoraFin', ''),
+            row_dict.get('Documento', ''),
+            row_dict.get('Nombre', ''),
+            row_dict.get('CalendarEventId', ''),
+            row_dict.get('Estado', ''),
+            row_dict.get('CreadoEn', ''),
+        ]
+        ws.append_row(valores)
+        return True
+    except Exception as e:
+        logger.exception(f"Error registrando agenda en Sheets: {e}")
+        return False
+
+
+def _parse_hhmm(value: str) -> time:
+    parts = value.split(':')
+    return time(hour=int(parts[0]), minute=int(parts[1]))
+
+
+def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    return a_start < b_end and b_start < a_end
+
+
+def calendar_list_free_slots(limit: int = 8):
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    start_window = now
+    end_window = now + timedelta(days=DAYS_AHEAD)
+
+    service = get_calendar_service()
+
+    # Obtener eventos existentes en ventana
+    events = []
+    try:
+        page_token = None
+        while True:
+            resp = service.events().list(
+                calendarId=CALENDAR_ID,
+                timeMin=start_window.isoformat(),
+                timeMax=end_window.isoformat(),
+                singleEvents=True,
+                orderBy='startTime',
+                pageToken=page_token
+            ).execute()
+            events.extend(resp.get('items', []))
+            page_token = resp.get('nextPageToken')
+            if not page_token:
+                break
+    except Exception as e:
+        logger.exception(f"Error listando eventos del calendario: {e}")
+        return []
+
+    busy = []
+    for ev in events:
+        try:
+            s = ev['start'].get('dateTime') or ev['start'].get('date')
+            e = ev['end'].get('dateTime') or ev['end'].get('date')
+            # Normalizar a datetime con tz
+            if 'T' in s:
+                s_dt = date_parser.isoparse(s)
+                if s_dt.tzinfo is None:
+                    s_dt = tz.localize(s_dt)
+            else:
+                # Evento de día completo; ocupar todo ese día
+                s_dt = tz.localize(datetime.combine(date_parser.isoparse(s).date(), time(0, 0)))
+            if 'T' in e:
+                e_dt = date_parser.isoparse(e)
+                if e_dt.tzinfo is None:
+                    e_dt = tz.localize(e_dt)
+            else:
+                e_dt = tz.localize(datetime.combine(date_parser.isoparse(e).date(), time(23, 59)))
+            busy.append((s_dt.astimezone(tz), e_dt.astimezone(tz)))
+        except Exception:
+            continue
+
+    # Generar slots
+    slots = []
+    start_hhmm = _parse_hhmm(BUSINESS_HOURS_START)
+    end_hhmm = _parse_hhmm(BUSINESS_HOURS_END)
+    allowed_days = set(int(x.strip()) for x in BUSINESS_DAYS.split(',') if x.strip())
+
+    cursor_day = start_window.date()
+    while cursor_day <= end_window.date() and len(slots) < limit:
+        day_dt = tz.localize(datetime.combine(cursor_day, time(0, 0)))
+        weekday_1_7 = day_dt.isoweekday()  # 1=Lunes ... 7=Domingo
+        if weekday_1_7 in allowed_days:
+            day_start = tz.localize(datetime.combine(cursor_day, start_hhmm))
+            day_end = tz.localize(datetime.combine(cursor_day, end_hhmm))
+            cursor = max(day_start, start_window)
+            while cursor + timedelta(minutes=SLOT_MINUTES) <= day_end and len(slots) < limit:
+                slot_start = cursor
+                slot_end = cursor + timedelta(minutes=SLOT_MINUTES)
+                # Chequear choque con busy
+                conflict = any(_overlaps(slot_start, slot_end, b0, b1) for b0, b1 in busy)
+                if not conflict:
+                    label = f"{slot_start.strftime('%Y-%m-%d %H:%M')} - {slot_end.strftime('%H:%M')}"
+                    slots.append({
+                        'label': label,
+                        'start': slot_start.isoformat(),
+                        'end': slot_end.isoformat()
+                    })
+                cursor += timedelta(minutes=SLOT_MINUTES)
+        cursor_day = cursor_day + timedelta(days=1)
+
+    return slots
+
+
+def calendar_create_event(start_iso: str, end_iso: str, summary: str, description: str) -> str:
+    service = get_calendar_service()
+    event = {
+        'summary': summary,
+        'description': description,
+        'start': {'dateTime': start_iso, 'timeZone': TIMEZONE},
+        'end': {'dateTime': end_iso, 'timeZone': TIMEZONE},
+    }
+    created = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+    return created.get('id', '')
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -399,6 +615,29 @@ async def cita_edad(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def cita_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['documento'] = update.message.text
+
+    # Intentar buscar en Google Sheets
+    paciente = sheets_find_patient(context.user_data['documento'])
+    if paciente:
+        context.user_data['paciente_sheet'] = paciente
+        resumen = (
+            "🔎 Se encontró un registro del paciente:\n\n"
+            f"🪪 Documento: {paciente.get('Documento','')}\n"
+            f"👤 Nombre: {paciente.get('Nombre','')}\n"
+            f"📅 Fecha Nacimiento: {paciente.get('Fecha Nacimiento','')}\n"
+            f"💼 Ocupación: {paciente.get('Ocupación','')}\n"
+            f"📞 Tel Fijo: {paciente.get('TelFIjo','')}\n"
+            f"📱 Celular: {paciente.get('Celular','')}\n"
+            f"📧 Correo: {paciente.get('Correo','')}\n"
+            f"🏠 Dirección: {paciente.get('Dirección','')}\n"
+            f"🗓️ Última cita: {paciente.get('Ultima cita','')}\n"
+            f"📝 Motivo última consulta: {paciente.get('Motivo ultima consulta','')}\n\n"
+            "¿Los datos son correctos para proceder a agendar?"
+        )
+        botones = [["Sí, agendar"], ["No, corregir datos"]]
+        await update.message.reply_text(resumen, reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True))
+        return CITAS_CONFIRMAR_PACIENTE
+
     await update.message.reply_text("💼 Ocupación:")
     return CITA_OCUPACION
 
@@ -443,11 +682,24 @@ async def cita_direccion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"📱 Celular: {context.user_data['celular']}\n"
         f"📧 Correo: {context.user_data['correo']}\n"
         f"🏠 Dirección: {context.user_data['direccion']}\n\n"
-        "Ahora te mostraremos nuestras políticas."
+        "Ahora, elige un horario disponible para tu cita."
     )
 
     await update.message.reply_text(resumen, parse_mode="Markdown")
-    return await handle_policies(update, context)
+
+    # Mostrar horarios disponibles
+    slots = calendar_list_free_slots(limit=8)
+    if not slots:
+        await update.message.reply_text("No hay horarios disponibles en este momento. Intenta más tarde.")
+        return await handle_policies(update, context)
+
+    context.user_data['slots'] = slots
+    botones = [[s['label']] for s in slots]
+    await update.message.reply_text(
+        "Selecciona un horario:",
+        reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+    )
+    return CITAS_ELEGIR_HORARIO
 
 # ====== FLUJO DE SUEROTERAPIA ======
 async def suero_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -529,6 +781,73 @@ async def suero_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Por favor selecciona una opción válida.")
         return SUERO_INFO
 
+# ====== NUEVOS HANDLERS DE AGENDA ======
+async def confirmar_paciente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    texto = update.message.text.strip().lower()
+    if 'sí' in texto or 'si' in texto or 'agendar' in texto:
+        # Mostrar horarios disponibles
+        slots = calendar_list_free_slots(limit=8)
+        if not slots:
+            await update.message.reply_text("No hay horarios disponibles en este momento. Intenta más tarde.")
+            return await handle_policies(update, context)
+        context.user_data['slots'] = slots
+        botones = [[s['label']] for s in slots]
+        await update.message.reply_text(
+            "Selecciona un horario:",
+            reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+        )
+        return CITAS_ELEGIR_HORARIO
+    else:
+        await update.message.reply_text("Entendido. Actualicemos tus datos. Por favor escribe el nombre completo del paciente:")
+        return CITA_NOMBRE
+
+
+async def elegir_horario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    elegido = update.message.text.strip()
+    slots = context.user_data.get('slots', [])
+    slot = next((s for s in slots if s['label'] == elegido), None)
+    if not slot:
+        await update.message.reply_text("Por favor selecciona un horario válido de la lista.")
+        return CITAS_ELEGIR_HORARIO
+
+    nombre = context.user_data.get('nombre') or (context.user_data.get('paciente_sheet') or {}).get('Nombre', '')
+    documento = context.user_data.get('documento', '')
+    correo = context.user_data.get('correo') or (context.user_data.get('paciente_sheet') or {}).get('Correo', '')
+
+    summary = f"Consulta - {nombre}" if nombre else "Consulta"
+    description = f"Documento: {documento}\nCorreo: {correo}\nCreado por bot"
+
+    try:
+        event_id = calendar_create_event(slot['start'], slot['end'], summary, description)
+    except Exception as e:
+        logger.exception(f"Error creando evento en Calendar: {e}")
+        await update.message.reply_text("Ocurrió un error al agendar. Intenta nuevamente más tarde.")
+        return await handle_policies(update, context)
+
+    # Registrar en Sheets AgendaCitas
+    try:
+        tz = pytz.timezone(TIMEZONE)
+        s_dt = date_parser.isoparse(slot['start']).astimezone(tz)
+        e_dt = date_parser.isoparse(slot['end']).astimezone(tz)
+        sheets_append_agenda({
+            'Fecha': s_dt.strftime('%Y-%m-%d'),
+            'HoraInicio': s_dt.strftime('%H:%M'),
+            'HoraFin': e_dt.strftime('%H:%M'),
+            'Documento': documento,
+            'Nombre': nombre,
+            'CalendarEventId': event_id,
+            'Estado': 'Agendado',
+            'CreadoEn': datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S'),
+        })
+    except Exception as e:
+        logger.exception(f"Error guardando en AgendaCitas: {e}")
+
+    await update.message.reply_text(
+        f"✅ Cita agendada para {elegido}.\nID de evento: {event_id}",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return await handle_policies(update, context)
+
 def main() -> None:
     """Ejecutar el bot"""
     telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -571,6 +890,8 @@ def main() -> None:
             SUERO_HORMONAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, suero_info)],
             SUERO_POSTQX: [MessageHandler(filters.TEXT & ~filters.COMMAND, suero_info)],
             SUERO_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, suero_info)],
+            CITAS_CONFIRMAR_PACIENTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirmar_paciente)],
+            CITAS_ELEGIR_HORARIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, elegir_horario)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
