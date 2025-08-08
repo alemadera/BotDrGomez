@@ -522,13 +522,18 @@ async def menu_es(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     elif text == "📄 Enviar exámenes":
         await update.message.reply_text(
-            "📎 Puedes enviar tus exámenes o información médica a:\n"
-            "- Correo: doctor@correo.com\n"
-            "- WhatsApp: +57 123 456 7890\n\n"
-            "Incluye tu nombre completo y la fecha de tu cita.\n"
-            "Si lo prefieres, también puedes adjuntar aquí el archivo."
+            "📄 Envío de exámenes al Dr. Luis F. Gómez\n\n"
+            "Para enviar tus exámenes, tienes las siguientes opciones:\n\n"
+            "📧 Correo: asistentedoctorgomez@gmail.com\n"
+            "💬 WhatsApp: wa.me/573163568908\n"
+            "💬 Telegram: t.me/573163568908\n\n"
+            "🔹 Recuerda incluir:\n"
+            "• 📄 Número de documento\n"
+            "• 🧍 Nombre completo\n"
+            "• 📅 Fecha de tu cita (dd/mm/aa) si ya la tienes\n"
+            "• 📎 Adjuntar los archivos correspondientes"
         )
-        return await handle_policies(update, context)
+        return MENU_ES
 
     elif text == "💧 Sueroterapia":
         return await suero_menu(update, context)
