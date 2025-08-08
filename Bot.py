@@ -123,16 +123,18 @@ def sheets_append_agenda(row_dict: dict):
         gc = get_gspread_client()
         sh = gc.open_by_key(SHEETS_SPREADSHEET_ID)
         ws = sh.worksheet(SHEETS_AGENDA_SHEET_NAME)
-        # Orden de columnas propuesto
+        # Orden de columnas definido por el usuario:
+        # Documento, Nombre, Telefono, Tipo de Cita, Fecha, Hora Inicio, Correo, CalendarEventId, Estado
         valores = [
-            row_dict.get('Fecha', ''),
-            row_dict.get('HoraInicio', ''),
-            row_dict.get('HoraFin', ''),
             row_dict.get('Documento', ''),
             row_dict.get('Nombre', ''),
+            row_dict.get('Telefono', ''),
+            row_dict.get('Tipo de Cita', ''),
+            row_dict.get('Fecha', ''),
+            row_dict.get('Hora Inicio', ''),
+            row_dict.get('Correo', ''),
             row_dict.get('CalendarEventId', ''),
             row_dict.get('Estado', ''),
-            row_dict.get('CreadoEn', ''),
         ]
         ws.append_row(valores)
         return True
@@ -813,9 +815,16 @@ async def elegir_horario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     nombre = context.user_data.get('nombre') or (context.user_data.get('paciente_sheet') or {}).get('Nombre', '')
     documento = context.user_data.get('documento', '')
     correo = context.user_data.get('correo') or (context.user_data.get('paciente_sheet') or {}).get('Correo', '')
+    telefono = (
+        context.user_data.get('celular')
+        or (context.user_data.get('paciente_sheet') or {}).get('Celular', '')
+        or context.user_data.get('telefono_fijo')
+        or (context.user_data.get('paciente_sheet') or {}).get('TelFIjo', '')
+    )
+    tipo_cita = context.user_data.get('tipo_cita', 'Consulta')
 
     summary = f"Consulta - {nombre}" if nombre else "Consulta"
-    description = f"Documento: {documento}\nCorreo: {correo}\nCreado por bot"
+    description = f"Documento: {documento}\nCorreo: {correo}\nTeléfono: {telefono}\nTipo de cita: {tipo_cita}\nCreado por bot"
 
     try:
         event_id = calendar_create_event(slot['start'], slot['end'], summary, description)
@@ -828,16 +837,16 @@ async def elegir_horario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         tz = pytz.timezone(TIMEZONE)
         s_dt = date_parser.isoparse(slot['start']).astimezone(tz)
-        e_dt = date_parser.isoparse(slot['end']).astimezone(tz)
         sheets_append_agenda({
-            'Fecha': s_dt.strftime('%Y-%m-%d'),
-            'HoraInicio': s_dt.strftime('%H:%M'),
-            'HoraFin': e_dt.strftime('%H:%M'),
             'Documento': documento,
             'Nombre': nombre,
+            'Telefono': telefono,
+            'Tipo de Cita': tipo_cita,
+            'Fecha': s_dt.strftime('%Y-%m-%d'),
+            'Hora Inicio': s_dt.strftime('%H:%M'),
+            'Correo': correo,
             'CalendarEventId': event_id,
             'Estado': 'Agendado',
-            'CreadoEn': datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S'),
         })
     except Exception as e:
         logger.exception(f"Error guardando en AgendaCitas: {e}")
