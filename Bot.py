@@ -994,7 +994,7 @@ async def elegir_horario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         event_id = calendar_create_event(slot['start'], slot['end'], summary, description)
     except Exception as e:
         logger.exception(f"Error creando evento en Calendar: {e}")
-        await update.message.reply_text("Ocurrió un error al agendar. Intenta nuevamente más tarde.")
+        await update.message.reply_text(f"Ocurrió un error al agendar: {e}")
         return await handle_policies(update, context)
 
     # Registrar en Sheets AgendaCitas
