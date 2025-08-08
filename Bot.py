@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
     TRATAMIENTO_MENU, TRATAMIENTO_INFO, PRECIOS_MENU, PRECIOS_DECISION, 
     EDUCACION_MENU, EDUCACION_DECISION, CONTACTO_OPCION, CONTACTO_RESPUESTA,
     SUERO_MENU, SUERO_BIENESTAR, SUERO_HORMONAL, SUERO_POSTQX, SUERO_INFO,
-    CITAS_CONFIRMAR_PACIENTE, CITAS_ELEGIR_HORARIO
-) = range(28)
+    CITAS_CONFIRMAR_PACIENTE, CITAS_ELEGIR_TIPO, CITAS_ELEGIR_HORARIO
+) = range(29)
 
 # ======== CONFIG & CLIENTS GOOGLE ========
 SHEETS_SPREADSHEET_ID = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_ID')
@@ -55,6 +55,61 @@ GOOGLE_SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/calendar'
 ]
+
+# ====== TIPOS DE CITA Y PLANTILLAS DE HORARIOS ======
+APPOINTMENT_TYPES = [
+    'Colonterapia',
+    'Primera vez',
+    'Control',
+    'Sueroterapia',
+]
+
+# Mapear isoweekday (1=Lunes ... 7=Domingo) a listas de slots por tipo
+# Cada slot es (inicio, fin) en formato 'HH:MM'
+SLOT_TEMPLATES = {
+    1: {  # Lunes
+        'Colonterapia': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('14:00','15:00'), ('15:30','16:30'), ('16:30','17:30')],
+        'Primera vez': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('14:00','15:00'), ('15:30','16:30'), ('16:30','17:30')],
+        'Control': [('09:00','09:30'), ('10:30','11:00'), ('15:00','15:30'), ('16:30','17:00')],
+        'Sueroterapia': [('09:00','09:30'), ('10:30','11:00'), ('15:00','15:30'), ('16:30','17:00')],
+    },
+    2: {  # Martes
+        'Colonterapia': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('16:30','17:30')],
+        'Primera vez': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('16:30','17:30')],
+        'Control': [('09:00','09:30'), ('10:30','11:00'), ('16:30','17:00')],
+        'Sueroterapia': [('09:00','09:30'), ('10:30','11:00'), ('16:30','17:00')],
+    },
+    3: {  # Miércoles
+        'Colonterapia': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('14:00','15:00'), ('15:30','16:30'), ('16:30','17:30')],
+        'Primera vez': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('14:00','15:00'), ('15:30','16:30'), ('16:30','17:30')],
+        'Control': [('09:00','09:30'), ('10:30','11:00'), ('15:00','15:30'), ('16:30','17:00')],
+        'Sueroterapia': [('09:00','09:30'), ('10:30','11:00'), ('15:00','15:30'), ('16:30','17:00')],
+    },
+    4: {  # Jueves
+        'Colonterapia': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('16:30','17:30')],
+        'Primera vez': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('16:30','17:30')],
+        'Control': [('09:00','09:30'), ('10:30','11:00'), ('16:30','17:00')],
+        'Sueroterapia': [('09:00','09:30'), ('10:30','11:00'), ('16:30','17:00')],
+    },
+    5: {  # Viernes
+        'Colonterapia': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('14:00','15:00'), ('15:30','16:30'), ('16:30','17:30')],
+        'Primera vez': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00'), ('14:00','15:00'), ('15:30','16:30'), ('16:30','17:30')],
+        'Control': [('09:00','09:30'), ('10:30','11:00'), ('15:00','15:30'), ('16:30','17:00')],
+        'Sueroterapia': [('09:00','09:30'), ('10:30','11:00'), ('15:00','15:30'), ('16:30','17:00')],
+    },
+    6: {  # Sábado
+        'Colonterapia': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00')],
+        'Primera vez': [('08:00','09:00'), ('09:30','10:30'), ('11:00','12:00')],
+        'Control': [('09:00','09:30'), ('10:30','11:00')],
+        'Sueroterapia': [('09:00','09:30'), ('10:30','11:00')],
+    },
+    7: {  # Domingo
+        'Colonterapia': [],
+        'Primera vez': [],
+        'Control': [],
+        'Sueroterapia': [],
+    },
+}
 
 
 def get_google_credentials():
@@ -152,87 +207,92 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
     return a_start < b_end and b_start < a_end
 
 
-def calendar_list_free_slots(limit: int = 8):
+def _list_calendar_events_in_window(start_window: datetime, end_window: datetime):
+    service = get_calendar_service()
+    events = []
+    page_token = None
+    while True:
+        resp = service.events().list(
+            calendarId=CALENDAR_ID,
+            timeMin=start_window.isoformat(),
+            timeMax=end_window.isoformat(),
+            singleEvents=True,
+            orderBy='startTime',
+            pageToken=page_token
+        ).execute()
+        events.extend(resp.get('items', []))
+        page_token = resp.get('nextPageToken')
+        if not page_token:
+            break
+    return events
+
+
+def calendar_list_free_slots_for_type(appointment_type: str, limit: int = 8):
     tz = pytz.timezone(TIMEZONE)
     now = datetime.now(tz)
     start_window = now
     end_window = now + timedelta(days=DAYS_AHEAD)
 
-    service = get_calendar_service()
-
     # Obtener eventos existentes en ventana
-    events = []
     try:
-        page_token = None
-        while True:
-            resp = service.events().list(
-                calendarId=CALENDAR_ID,
-                timeMin=start_window.isoformat(),
-                timeMax=end_window.isoformat(),
-                singleEvents=True,
-                orderBy='startTime',
-                pageToken=page_token
-            ).execute()
-            events.extend(resp.get('items', []))
-            page_token = resp.get('nextPageToken')
-            if not page_token:
-                break
+        items = _list_calendar_events_in_window(start_window, end_window)
     except Exception as e:
         logger.exception(f"Error listando eventos del calendario: {e}")
         return []
 
-    busy = []
-    for ev in events:
-        try:
-            s = ev['start'].get('dateTime') or ev['start'].get('date')
-            e = ev['end'].get('dateTime') or ev['end'].get('date')
-            # Normalizar a datetime con tz
-            if 'T' in s:
-                s_dt = date_parser.isoparse(s)
-                if s_dt.tzinfo is None:
-                    s_dt = tz.localize(s_dt)
-            else:
-                # Evento de día completo; ocupar todo ese día
-                s_dt = tz.localize(datetime.combine(date_parser.isoparse(s).date(), time(0, 0)))
-            if 'T' in e:
-                e_dt = date_parser.isoparse(e)
-                if e_dt.tzinfo is None:
-                    e_dt = tz.localize(e_dt)
-            else:
-                e_dt = tz.localize(datetime.combine(date_parser.isoparse(e).date(), time(23, 59)))
-            busy.append((s_dt.astimezone(tz), e_dt.astimezone(tz)))
-        except Exception:
-            continue
+    # Mapear ocupaciones por día y verificar si hay colonterapia por día
+    busy_by_day = {}
+    has_colonterapia_by_day = {}
 
-    # Generar slots
+    for ev in items:
+        s = ev['start'].get('dateTime') or ev['start'].get('date')
+        e = ev['end'].get('dateTime') or ev['end'].get('date')
+        if 'T' in s:
+            s_dt = date_parser.isoparse(s)
+            if s_dt.tzinfo is None:
+                s_dt = tz.localize(s_dt)
+        else:
+            s_dt = tz.localize(datetime.combine(date_parser.isoparse(s).date(), time(0, 0)))
+        if 'T' in e:
+            e_dt = date_parser.isoparse(e)
+            if e_dt.tzinfo is None:
+                e_dt = tz.localize(e_dt)
+        else:
+            e_dt = tz.localize(datetime.combine(date_parser.isoparse(e).date(), time(23, 59)))
+        s_dt = s_dt.astimezone(tz)
+        e_dt = e_dt.astimezone(tz)
+        day_key = s_dt.date()
+        busy_by_day.setdefault(day_key, []).append((s_dt, e_dt))
+        desc = (ev.get('description') or '') + ' ' + (ev.get('summary') or '')
+        if 'Tipo de cita: Colonterapia' in desc:
+            has_colonterapia_by_day[day_key] = True
+
+    # Generar slots por la plantilla del tipo
     slots = []
-    start_hhmm = _parse_hhmm(BUSINESS_HOURS_START)
-    end_hhmm = _parse_hhmm(BUSINESS_HOURS_END)
-    allowed_days = set(int(x.strip()) for x in BUSINESS_DAYS.split(',') if x.strip())
-
     cursor_day = start_window.date()
     while cursor_day <= end_window.date() and len(slots) < limit:
-        day_dt = tz.localize(datetime.combine(cursor_day, time(0, 0)))
-        weekday_1_7 = day_dt.isoweekday()  # 1=Lunes ... 7=Domingo
-        if weekday_1_7 in allowed_days:
-            day_start = tz.localize(datetime.combine(cursor_day, start_hhmm))
-            day_end = tz.localize(datetime.combine(cursor_day, end_hhmm))
-            cursor = max(day_start, start_window)
-            while cursor + timedelta(minutes=SLOT_MINUTES) <= day_end and len(slots) < limit:
-                slot_start = cursor
-                slot_end = cursor + timedelta(minutes=SLOT_MINUTES)
-                # Chequear choque con busy
-                conflict = any(_overlaps(slot_start, slot_end, b0, b1) for b0, b1 in busy)
+        weekday = tz.localize(datetime.combine(cursor_day, time(0, 0))).isoweekday()
+        day_template = SLOT_TEMPLATES.get(weekday, {}).get(appointment_type, [])
+        if day_template:
+            # Condición: para Control, el slot 16:30-17:00 solo si no hay colonterapia ese día
+            for hhmm_start, hhmm_end in day_template:
+                if appointment_type == 'Control' and hhmm_start == '16:30' and hhmm_end == '17:00':
+                    if has_colonterapia_by_day.get(cursor_day, False):
+                        continue
+                start_dt = tz.localize(datetime.combine(cursor_day, _parse_hhmm(hhmm_start)))
+                end_dt = tz.localize(datetime.combine(cursor_day, _parse_hhmm(hhmm_end)))
+                # Evitar pasado
+                if end_dt <= now:
+                    continue
+                # Chequear choque
+                day_busy = busy_by_day.get(cursor_day, [])
+                conflict = any(_overlaps(start_dt, end_dt, b0, b1) for b0, b1 in day_busy)
                 if not conflict:
-                    label = f"{slot_start.strftime('%Y-%m-%d %H:%M')} - {slot_end.strftime('%H:%M')}"
-                    slots.append({
-                        'label': label,
-                        'start': slot_start.isoformat(),
-                        'end': slot_end.isoformat()
-                    })
-                cursor += timedelta(minutes=SLOT_MINUTES)
+                    label = f"{start_dt.strftime('%Y-%m-%d %H:%M')} - {end_dt.strftime('%H:%M')}"
+                    slots.append({'label': label, 'start': start_dt.isoformat(), 'end': end_dt.isoformat()})
+                    if len(slots) >= limit:
+                        break
         cursor_day = cursor_day + timedelta(days=1)
-
     return slots
 
 
@@ -684,24 +744,18 @@ async def cita_direccion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"📱 Celular: {context.user_data['celular']}\n"
         f"📧 Correo: {context.user_data['correo']}\n"
         f"🏠 Dirección: {context.user_data['direccion']}\n\n"
-        "Ahora, elige un horario disponible para tu cita."
+        "Selecciona el tipo de cita para mostrar horarios disponibles."
     )
 
     await update.message.reply_text(resumen, parse_mode="Markdown")
 
-    # Mostrar horarios disponibles
-    slots = calendar_list_free_slots(limit=8)
-    if not slots:
-        await update.message.reply_text("No hay horarios disponibles en este momento. Intenta más tarde.")
-        return await handle_policies(update, context)
-
-    context.user_data['slots'] = slots
-    botones = [[s['label']] for s in slots]
+    # Pedir tipo de cita
+    botones = [[t] for t in APPOINTMENT_TYPES]
     await update.message.reply_text(
-        "Selecciona un horario:",
+        "¿Qué tipo de cita deseas agendar?",
         reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
     )
-    return CITAS_ELEGIR_HORARIO
+    return CITAS_ELEGIR_TIPO
 
 # ====== FLUJO DE SUEROTERAPIA ======
 async def suero_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -787,21 +841,36 @@ async def suero_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def confirmar_paciente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     texto = update.message.text.strip().lower()
     if 'sí' in texto or 'si' in texto or 'agendar' in texto:
-        # Mostrar horarios disponibles
-        slots = calendar_list_free_slots(limit=8)
-        if not slots:
-            await update.message.reply_text("No hay horarios disponibles en este momento. Intenta más tarde.")
-            return await handle_policies(update, context)
-        context.user_data['slots'] = slots
-        botones = [[s['label']] for s in slots]
+        botones = [[t] for t in APPOINTMENT_TYPES]
         await update.message.reply_text(
-            "Selecciona un horario:",
+            "Perfecto. Selecciona el tipo de cita:",
             reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
         )
-        return CITAS_ELEGIR_HORARIO
+        return CITAS_ELEGIR_TIPO
     else:
         await update.message.reply_text("Entendido. Actualicemos tus datos. Por favor escribe el nombre completo del paciente:")
         return CITA_NOMBRE
+
+
+async def seleccionar_tipo_cita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    tipo = update.message.text.strip()
+    if tipo not in APPOINTMENT_TYPES:
+        await update.message.reply_text("Por favor elige un tipo de cita válido.")
+        return CITAS_ELEGIR_TIPO
+    context.user_data['tipo_cita'] = tipo
+
+    slots = calendar_list_free_slots_for_type(tipo, limit=8)
+    if not slots:
+        await update.message.reply_text("No hay horarios disponibles para este tipo de cita en este momento. Intenta más tarde o elige otro tipo.")
+        return await handle_policies(update, context)
+
+    context.user_data['slots'] = slots
+    botones = [[s['label']] for s in slots]
+    await update.message.reply_text(
+        "Selecciona un horario:",
+        reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+    )
+    return CITAS_ELEGIR_HORARIO
 
 
 async def elegir_horario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -900,6 +969,7 @@ def main() -> None:
             SUERO_POSTQX: [MessageHandler(filters.TEXT & ~filters.COMMAND, suero_info)],
             SUERO_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, suero_info)],
             CITAS_CONFIRMAR_PACIENTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirmar_paciente)],
+            CITAS_ELEGIR_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, seleccionar_tipo_cita)],
             CITAS_ELEGIR_HORARIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, elegir_horario)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
