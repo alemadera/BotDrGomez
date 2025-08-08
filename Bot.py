@@ -226,6 +226,45 @@ def sheets_append_agenda(row_dict: dict):
         return False
 
 
+def sheets_append_patient(row_dict: dict) -> bool:
+    # Modo Apps Script
+    if INTEGRATION_MODE == 'apps_script':
+        try:
+            res = apps_script_call('append_patient', {'row': row_dict})
+            if not res.get('ok', False):
+                logger.error(f"AppsScript append_patient failed: {res}")
+                return False
+            return True
+        except Exception as e:
+            logger.exception(f"AppsScript append_patient error: {e}")
+            return False
+    # Modo API de Google
+    if not SHEETS_SPREADSHEET_ID:
+        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado; no se registrará el paciente en Sheets")
+        return False
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_key(SHEETS_SPREADSHEET_ID)
+        ws = sh.worksheet(SHEETS_PACIENTE_SHEET_NAME)
+        valores = [
+            row_dict.get('Documento', ''),
+            row_dict.get('Nombre', ''),
+            row_dict.get('Fecha Nacimiento', ''),
+            row_dict.get('Ocupación', ''),
+            row_dict.get('TelFIjo', ''),
+            row_dict.get('Celular', ''),
+            row_dict.get('Correo', ''),
+            row_dict.get('Dirección', ''),
+            row_dict.get('Ultima cita', ''),
+            row_dict.get('Motivo ultima consulta', ''),
+        ]
+        ws.append_row(valores)
+        return True
+    except Exception as e:
+        logger.exception(f"Error registrando paciente en Sheets: {e}")
+        return False
+
+
 def _parse_hhmm(value: str) -> time:
     parts = value.split(':')
     return time(hour=int(parts[0]), minute=int(parts[1]))
@@ -763,6 +802,7 @@ async def cita_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Intentar buscar en Google Sheets
     paciente = sheets_find_patient(context.user_data['documento'])
     if paciente:
+        context.user_data['is_new_patient'] = False
         context.user_data['paciente_sheet'] = paciente
         resumen = (
             "🔎 Se encontró un registro del paciente:\n\n"
@@ -782,6 +822,7 @@ async def cita_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(resumen, reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True))
         return CITAS_CONFIRMAR_PACIENTE
 
+    context.user_data['is_new_patient'] = True
     await update.message.reply_text("No encontramos tu registro. Continuaremos registrando tus datos para agendar.")
     # Si aún no tenemos nombre, lo pedimos antes de ocupación
     if not context.user_data.get('nombre'):
@@ -817,6 +858,27 @@ async def cita_correo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def cita_direccion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['direccion'] = update.message.text
+
+    # Si es nuevo paciente, guardar en la hoja Pacientes
+    try:
+        if context.user_data.get('is_new_patient'):
+            patient_row = {
+                'Documento': context.user_data.get('documento', ''),
+                'Nombre': context.user_data.get('nombre', ''),
+                'Fecha Nacimiento': context.user_data.get('nacimiento', ''),
+                'Ocupación': context.user_data.get('ocupacion', ''),
+                'TelFIjo': context.user_data.get('telefono_fijo', ''),
+                'Celular': context.user_data.get('celular', ''),
+                'Correo': context.user_data.get('correo', ''),
+                'Dirección': context.user_data.get('direccion', ''),
+                'Ultima cita': '',
+                'Motivo ultima consulta': '',
+            }
+            saved = sheets_append_patient(patient_row)
+            if not saved:
+                logger.warning("No se pudo guardar el paciente nuevo en la hoja Pacientes")
+    except Exception as e:
+        logger.exception(f"Error guardando paciente nuevo: {e}")
 
     try:
         nombre = context.user_data.get('nombre', '')
