@@ -533,6 +533,16 @@ async def menu_es(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "• 📅 Fecha de tu cita (dd/mm/aa) si ya la tienes\n"
             "• 📎 Adjuntar los archivos correspondientes"
         )
+        botones_examenes = [["Está bien 👍", "Volver al menú"]]
+        await update.message.reply_text(
+            "✨ Gracias por enviarnos tus resultados\n"
+            "Hemos recibido tu información y será revisada en el transcurso del día.\n"
+            "📋 Las observaciones te serán compartidas en tu próximo control.\n"
+            "⚠️ Recuerda: esta información no será tratada como urgente, salvo que así se haya acordado previamente en tu consulta.\n\n"
+            "Está bien 👍.\n"
+            "Cuando los tengas listos, recuerda enviarlos por los canales indicados para que estén disponibles antes de tu cita.",
+            reply_markup=ReplyKeyboardMarkup(botones_examenes, one_time_keyboard=True, resize_keyboard=True)
+        )
         return MENU_ES
 
     elif text == "💧 Sueroterapia":
@@ -546,6 +556,9 @@ async def menu_es(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     elif text == "👥 Contactar Asesor":
         return await contacto_menu(update, context)
+
+    elif text == "Volver al menú" or text == "Está bien 👍":
+        return await menu(update, context)
 
     else:
         await update.message.reply_text("Por favor elige una opción válida del menú.")
