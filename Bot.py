@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
     TRATAMIENTO_MENU, TRATAMIENTO_INFO, PRECIOS_MENU, PRECIOS_DECISION, 
     EDUCACION_MENU, EDUCACION_DECISION, CONTACTO_OPCION, CONTACTO_RESPUESTA,
     SUERO_MENU, SUERO_BIENESTAR, SUERO_HORMONAL, SUERO_POSTQX, SUERO_INFO,
-    CITAS_CONFIRMAR_PACIENTE, CITAS_ELEGIR_TIPO, CITAS_ELEGIR_HORARIO
-) = range(29)
+    CITAS_CONFIRMAR_PACIENTE, CITAS_ELEGIR_TIPO, CITAS_ELEGIR_HORARIO,
+    METODOS_PAGO
+) = range(30)
 
 # ======== CONFIG & CLIENTS GOOGLE ========
 SHEETS_SPREADSHEET_ID = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_ID')
@@ -816,28 +817,69 @@ async def handle_policies(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
     return POLICIES
 
+async def _mostrar_metodos_pago(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    mensaje = (
+        "💳 Métodos de pago para agendar tu cita\n\n"
+        "Para confirmar tu cita, realiza un pago de $50.000 COP (anticipo) por cualquiera de los siguientes medios:\n\n"
+        "📱 Nequi: 316 356 8908\n"
+        "🏦 Bancolombia: Cuenta de ahorros N° 745-533578-22 a nombre de Luis Fernando Gómez\n\n"
+        "📄 Envío del soporte de pago\n"
+        "Una vez realices el pago, envía el comprobante por WhatsApp 📲 wa.me/573163568908 o por Telegram 📲 t.me/573163568908 junto con:\n\n"
+        "- Nombre completo\n"
+        "- Número de documento\n"
+        "- Fecha y hora de tu cita"
+    )
+    await update.message.reply_text(mensaje)
+    botones = [["✅ Ya envié el soporte", "⏳ Lo enviaré después"]]
+    await update.message.reply_text(
+        "Por favor selecciona una opción:",
+        reply_markup=ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+    )
+    return METODOS_PAGO
+
+async def _respuesta_metodos_pago(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    texto = update.message.text.strip()
+    if texto == "✅ Ya envié el soporte":
+        await update.message.reply_text(
+            "📌 ¡Perfecto! Hemos recibido tu mensaje.\n\n"
+            "Nuestro equipo revisará el comprobante y confirmará tu cita en las próximas horas.\n\n"
+            "☕ Mientras tanto, recuerda que si necesitas hacer algún cambio, debes avisar con al menos 24 horas de anticipación."
+        )
+    elif texto == "⏳ Lo enviaré después":
+        await update.message.reply_text(
+            "⏳ Entendido.\n\n"
+            "Recuerda que tu cita solo quedará confirmada cuando recibamos el soporte del pago de $50.000 COP.\n\n"
+            "Puedes enviarlo en cualquier momento por WhatsApp 📲 wa.me/573163568908 o por Telegram 📲 t.me/573163568908\n\n"
+            "🔔 Ten presente que sin el pago anticipado, tu horario podría ser liberado para otro paciente."
+        )
+    else:
+        await update.message.reply_text("Por favor selecciona una opción válida.")
+        return METODOS_PAGO
+
+    await asyncio.sleep(0.3)
+    await update.message.reply_text(
+        "🔄 ¿Qué deseas hacer ahora?\n\n"
+        "👉 Volver al menú: /menu\n"
+        "🚪 Cerrar la conversación: /cancel"
+    )
+    return MENU_ES
+
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Confirmación y cierre del flujo"""
 
     respuesta = update.message.text.lower().strip()
 
     if "sí" in respuesta or "si" in respuesta:
-        await update.message.reply_text(
-            "✅ ¡Gracias por contactarnos! Tu solicitud ha sido procesada.\n\n"
-            "📎 Si deseas unirte a nuestra comunidad de WhatsApp: [Enlace aquí]\n"
-            "📝 También puedes responder una encuesta rápida: [Enlace a encuesta]",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        # En lugar de finalizar, mostrar métodos de pago
+        return await _mostrar_metodos_pago(update, context)
     else:
         await update.message.reply_text(
             "Entendido. Si necesitas más información, puedes hablar con nuestro equipo.",
             reply_markup=ReplyKeyboardRemove()
         )
 
-    # 👇 Pausa de seguridad para evitar que Telegram omita el segundo mensaje
     await asyncio.sleep(0.6)
 
-    # 👇 Mensaje final con opciones claras
     await update.message.reply_text(
         "🔄 ¿Qué deseas hacer ahora?\n\n"
         "👉 *Volver al menú:* /menu\n"
@@ -1239,6 +1281,7 @@ def main() -> None:
             CITAS_CONFIRMAR_PACIENTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirmar_paciente)],
             CITAS_ELEGIR_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, seleccionar_tipo_cita)],
             CITAS_ELEGIR_HORARIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, elegir_horario)],
+            METODOS_PAGO: [MessageHandler(filters.TEXT & ~filters.COMMAND, _respuesta_metodos_pago)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
